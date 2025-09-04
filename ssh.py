@@ -72,4 +72,4 @@ if __name__ == "__main__":
     username_lists = read_wordlist(username_files)
     password_lists = read_wordlist(password_files)
 
-    ssh_bruteforce(target_ip, target_port, username_list, password_list)
+    ssh_brute(target_ip, target_port, username_list, password_list)
