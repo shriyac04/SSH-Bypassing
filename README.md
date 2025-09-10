@@ -1,5 +1,5 @@
 
-# SSH Bypassing Script
+# SSH Brute-force Script
 
 A brief description of what this project does and who it's for
 
